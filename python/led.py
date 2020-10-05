@@ -3,7 +3,7 @@ from __future__ import division
 
 import platform
 import numpy as np
-import config
+from python import config
 
 # ESP8266 uses WiFi communication
 if config.DEVICE == 'esp8266':
@@ -22,7 +22,7 @@ elif config.DEVICE == 'blinkstick':
     import sys
     #Will turn all leds off when invoked.
     def signal_handler(signal, frame):
-        all_off = [0]*(config.N_PIXELS*3)
+        all_off = [0]*(config.N_PIXELS * 3)
         stick.set_led_data(0, all_off)
         sys.exit(0)
 
@@ -34,10 +34,10 @@ elif config.DEVICE == 'blinkstick':
 _gamma = np.load(config.GAMMA_TABLE_PATH)
 """Gamma lookup table used for nonlinear brightness correction"""
 
-_prev_pixels = np.tile(253, (3, config.N_PIXELS))
+_prev_pixels = np.tile(253, (4, config.N_PIXELS))
 """Pixel values that were most recently displayed on the LED strip"""
 
-pixels = np.tile(1, (3, config.N_PIXELS))
+pixels = np.tile(1, (4, config.N_PIXELS))
 """Pixel values for the LED strip"""
 
 _is_python_2 = int(platform.python_version_tuple()[0]) == 2
@@ -69,16 +69,14 @@ def _update_esp8266():
     n_packets = len(idx) // MAX_PIXELS_PER_PACKET + 1
     idx = np.array_split(idx, n_packets)
     for packet_indices in idx:
-        m = '' if _is_python_2 else []
+        m = []
         for i in packet_indices:
-            if _is_python_2:
-                m += chr(i) + chr(p[0][i]) + chr(p[1][i]) + chr(p[2][i])
-            else:
-                m.append(i)  # Index of pixel to change
-                m.append(p[0][i])  # Pixel red value
-                m.append(p[1][i])  # Pixel green value
-                m.append(p[2][i])  # Pixel blue value
-        m = m if _is_python_2 else bytes(m)
+            m.append(i)  # Index of pixel to change
+            m.append(p[0][i])  # Pixel red value
+            m.append(p[1][i])  # Pixel green value
+            m.append(p[2][i])  # Pixel blue value
+            m.append(p[3][i]) if p.shape[0] == 4 else m.append(0)
+        m = bytes(m)
         _sock.sendto(m, (config.UDP_IP, config.UDP_PORT))
     _prev_pixels = np.copy(p)
 
@@ -104,8 +102,7 @@ def _update_pi():
         # Ignore pixels if they haven't changed (saves bandwidth)
         if np.array_equal(p[:, i], _prev_pixels[:, i]):
             continue
-        #strip._led_data[i] = rgb[i]
-        strip._led_data[i] = int(rgb[i])
+        strip._led_data[i] = rgb[i]
     _prev_pixels = np.copy(p)
     strip.show()
 
@@ -125,7 +122,7 @@ def _update_blinkstick():
     b = p[2][:].astype(int)
 
     #create array in which we will store the led states
-    newstrip = [None]*(config.N_PIXELS*3)
+    newstrip = [None]*(config.N_PIXELS * 3)
 
     for i in range(config.N_PIXELS):
         # blinkstick uses GRB format
@@ -158,8 +155,9 @@ if __name__ == '__main__':
     pixels[0, 0] = 255  # Set 1st pixel red
     pixels[1, 1] = 255  # Set 2nd pixel green
     pixels[2, 2] = 255  # Set 3rd pixel blue
+    pixels[3, 3] = 255  # Set 3rd pixel white
     print('Starting LED strand test')
     while True:
         pixels = np.roll(pixels, 1, axis=1)
         update()
-        time.sleep(.1)
+        time.sleep(1)

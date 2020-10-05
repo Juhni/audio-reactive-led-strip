@@ -3,10 +3,10 @@ from __future__ import division
 import time
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter1d
-import config
-import microphone
-import dsp
-import led
+from python import led, microphone, dsp, config
+#import ligh_tests
+import matplotlib.pyplot as plt
+import scipy.fftpack
 
 _time_prev = time.time() * 1000.0
 """The previous time that the frames_per_second() function was called"""
@@ -94,10 +94,10 @@ g_filt = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
 b_filt = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
                        alpha_decay=0.1, alpha_rise=0.5)
 common_mode = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
-                       alpha_decay=0.99, alpha_rise=0.01)
-p_filt = dsp.ExpFilter(np.tile(1, (3, config.N_PIXELS // 2)),
+                            alpha_decay=0.99, alpha_rise=0.01)
+p_filt = dsp.ExpFilter(np.tile(1, (4, config.N_PIXELS // 2)),
                        alpha_decay=0.1, alpha_rise=0.99)
-p = np.tile(1.0, (3, config.N_PIXELS // 2))
+p = np.tile(1.0, (4, config.N_PIXELS // 2))
 gain = dsp.ExpFilter(np.tile(0.01, config.N_FFT_BINS),
                      alpha_decay=0.001, alpha_rise=0.99)
 
@@ -112,14 +112,16 @@ def visualize_scroll(y):
     r = int(np.max(y[:len(y) // 3]))
     g = int(np.max(y[len(y) // 3: 2 * len(y) // 3]))
     b = int(np.max(y[2 * len(y) // 3:]))
+    w = 0
     # Scrolling effect window
     p[:, 1:] = p[:, :-1]
     p *= 0.98
-    p = gaussian_filter1d(p, sigma=0.2)
+    #p = gaussian_filter1d(p, sigma=0.2)
     # Create new color originating at the center
     p[0, 0] = r
     p[1, 0] = g
     p[2, 0] = b
+    p[3, 0] = w
     # Update the LED strip
     return np.concatenate((p[:, ::-1], p), axis=1)
 
@@ -137,6 +139,7 @@ def visualize_energy(y):
     r = int(np.mean(y[:len(y) // 3]**scale))
     g = int(np.mean(y[len(y) // 3: 2 * len(y) // 3]**scale))
     b = int(np.mean(y[2 * len(y) // 3:]**scale))
+    w = 0
     # Assign color to different frequency regions
     p[0, :r] = 255.0
     p[0, r:] = 0.0
@@ -144,14 +147,19 @@ def visualize_energy(y):
     p[1, g:] = 0.0
     p[2, :b] = 255.0
     p[2, b:] = 0.0
+    p[3, :w] = 255.0
+    p[3, w:] = 0.0
     p_filt.update(p)
     p = np.round(p_filt.value)
     # Apply substantial blur to smooth the edges
     p[0, :] = gaussian_filter1d(p[0, :], sigma=4.0)
     p[1, :] = gaussian_filter1d(p[1, :], sigma=4.0)
     p[2, :] = gaussian_filter1d(p[2, :], sigma=4.0)
+    p[3, :] = gaussian_filter1d(p[3, :], sigma=4.0)
     # Set the new pixel value
-    return np.concatenate((p[:, ::-1], p), axis=1)
+    output = np.concatenate((p[:, ::-1], p), axis=1)
+    #send_output(output)
+    return output
 
 
 _prev_spectrum = np.tile(0.01, config.N_PIXELS // 2)
@@ -175,13 +183,49 @@ def visualize_spectrum(y):
     output = np.array([r, g,b]) * 255
     return output
 
+def visualize_bpm(y):
+    """Effect that originates in the center and scrolls outwards"""
+    global p
+    y = y**2.0
+    gain.update(y)
+    y /= gain.value
+    y *= 255.0
+    #detect_bpm(y)
+    r = int(np.max(y[:len(y)]))
+    #g = int(np.max(y[len(y) // 3: 2 * len(y) // 3]))
+    #b = int(np.max(y[len(y) // 3:]))
+    g = 0
+    b = 0
+    # Scrolling effect window
+    p[:, 1:] = p[:, :-1]
+    #p *= 0.98
+    #p = gaussian_filter1d(p, sigma=0.2)
+    # Create new color originating at the center
+    p[0, 0] = r
+    p[1, 0] = g
+    p[2, 0] = b
+    # Update the LED strip
+    return p
+
+def detect_bpm(y):
+    N = 1200
+    # sample spacing
+    T = 1.0 / 8000
+    x = np.linspace(0.0, N * T, N)
+    yf = scipy.fftpack.fft(y)
+    xf = np.linspace(0.0, 1.0 / (2.0 * T), N / 2)
+
+    fig, ax = plt.subplots()
+    ax.plot(xf, 2.0 / N * np.abs(yf[:N // 2]))
+    plt.show()
+
 
 fft_plot_filter = dsp.ExpFilter(np.tile(1e-1, config.N_FFT_BINS),
-                         alpha_decay=0.5, alpha_rise=0.99)
+                                alpha_decay=0.5, alpha_rise=0.99)
 mel_gain = dsp.ExpFilter(np.tile(1e-1, config.N_FFT_BINS),
                          alpha_decay=0.01, alpha_rise=0.99)
 mel_smoothing = dsp.ExpFilter(np.tile(1e-1, config.N_FFT_BINS),
-                         alpha_decay=0.5, alpha_rise=0.99)
+                              alpha_decay=0.5, alpha_rise=0.99)
 volume = dsp.ExpFilter(config.MIN_VOLUME_THRESHOLD,
                        alpha_decay=0.02, alpha_rise=0.02)
 fft_window = np.hamming(int(config.MIC_RATE / config.FPS) * config.N_ROLLING_HISTORY)
@@ -196,11 +240,12 @@ def microphone_update(audio_samples):
     y_roll[:-1] = y_roll[1:]
     y_roll[-1, :] = np.copy(y)
     y_data = np.concatenate(y_roll, axis=0).astype(np.float32)
-    
+
+
     vol = np.max(np.abs(y_data))
     if vol < config.MIN_VOLUME_THRESHOLD:
         print('No audio input. Volume below threshold. Volume:', vol)
-        led.pixels = np.tile(0, (3, config.N_PIXELS))
+        led.pixels = np.tile(0, (4, config.N_PIXELS))
         led.update()
     else:
         # Transform audio input into the frequency domain
@@ -208,6 +253,7 @@ def microphone_update(audio_samples):
         N_zeros = 2**int(np.ceil(np.log2(N))) - N
         # Pad with zeros until the next power of two
         y_data *= fft_window
+        #detect_bpm(y_data)
         y_padded = np.pad(y_data, (0, N_zeros), mode='constant')
         YS = np.abs(np.fft.rfft(y_padded)[:N // 2])
         # Construct a Mel filterbank from the FFT data
@@ -251,6 +297,22 @@ y_roll = np.random.rand(config.N_ROLLING_HISTORY, samples_per_frame) / 1e16
 visualization_effect = visualize_spectrum
 """Visualization effect to display on the LED strip"""
 
+# effect = 'spectrum'
+# def visualization_effect(mel):
+#     if effect == 'energy':
+#         return visualize_energy(mel)
+#     if effect == 'scroll':
+#         return visualize_scroll(mel)
+#     if effect == 'spectrum':
+#         return visualize_spectrum(mel)
+#
+# def change_effect(cmd):
+#     global effect
+#     if cmd == 'energy' or cmd == 'scroll' or cmd == 'spectrum':
+#         effect = cmd
+#     else:
+#         pass
+#     print(effect)
 
 if __name__ == '__main__':
     if config.USE_GUI:
@@ -265,7 +327,7 @@ if __name__ == '__main__':
         view.setWindowTitle('Visualization')
         view.resize(800,600)
         # Mel filterbank plot
-        fft_plot = layout.addPlot(title='Filterbank Output', colspan=3)
+        fft_plot = layout.addPlot(title='Filterbank Output', colspan=4)
         fft_plot.setRange(yRange=[-0.1, 1.2])
         fft_plot.disableAutoRange(axis=pg.ViewBox.YAxis)
         x_data = np.array(range(1, config.N_FFT_BINS + 1))
@@ -274,7 +336,7 @@ if __name__ == '__main__':
         fft_plot.addItem(mel_curve)
         # Visualization plot
         layout.nextRow()
-        led_plot = layout.addPlot(title='Visualization Output', colspan=3)
+        led_plot = layout.addPlot(title='Visualization Output', colspan=4)
         led_plot.setRange(yRange=[-5, 260])
         led_plot.disableAutoRange(axis=pg.ViewBox.YAxis)
         # Pen for each of the color channel curves
@@ -306,8 +368,8 @@ if __name__ == '__main__':
             config.MAX_FREQUENCY = maxf
             dsp.create_mel_bank()
         freq_slider = pg.TickSliderItem(orientation='bottom', allowAdd=False)
-        freq_slider.addTick((config.MIN_FREQUENCY / (config.MIC_RATE / 2.0))**0.5)
-        freq_slider.addTick((config.MAX_FREQUENCY / (config.MIC_RATE / 2.0))**0.5)
+        freq_slider.addTick((config.MIN_FREQUENCY / (config.MIC_RATE / 2.0)) ** 0.5)
+        freq_slider.addTick((config.MAX_FREQUENCY / (config.MIC_RATE / 2.0)) * 0.5)
         freq_slider.tickMoveFinished = freq_slider_change
         freq_label.setText('Frequency range: {} - {} Hz'.format(
             config.MIN_FREQUENCY,
@@ -321,36 +383,51 @@ if __name__ == '__main__':
             energy_label.setText('Energy', color=active_color)
             scroll_label.setText('Scroll', color=inactive_color)
             spectrum_label.setText('Spectrum', color=inactive_color)
+            bpm_label.setText('BPM', color=inactive_color)
         def scroll_click(x):
             global visualization_effect
             visualization_effect = visualize_scroll
             energy_label.setText('Energy', color=inactive_color)
             scroll_label.setText('Scroll', color=active_color)
             spectrum_label.setText('Spectrum', color=inactive_color)
+            bpm_label.setText('BPM', color=inactive_color)
         def spectrum_click(x):
             global visualization_effect
             visualization_effect = visualize_spectrum
             energy_label.setText('Energy', color=inactive_color)
             scroll_label.setText('Scroll', color=inactive_color)
             spectrum_label.setText('Spectrum', color=active_color)
+            bpm_label.setText('BPM', color=inactive_color)
+        def bpm_click(x):
+            global visualization_effect
+            visualization_effect = visualize_bpm
+            energy_label.setText('Energy', color=inactive_color)
+            scroll_label.setText('Scroll', color=inactive_color)
+            spectrum_label.setText('Spectrum', color=inactive_color)
+            bpm_label.setText('BPM', color=active_color)
+
         # Create effect "buttons" (labels with click event)
         energy_label = pg.LabelItem('Energy')
         scroll_label = pg.LabelItem('Scroll')
         spectrum_label = pg.LabelItem('Spectrum')
+        bpm_label = pg.LabelItem('BPM')
         energy_label.mousePressEvent = energy_click
         scroll_label.mousePressEvent = scroll_click
         spectrum_label.mousePressEvent = spectrum_click
+        bpm_label.mousePressEvent = bpm_click
         energy_click(0)
         # Layout
         layout.nextRow()
-        layout.addItem(freq_label, colspan=3)
+        layout.addItem(freq_label, colspan=4)
         layout.nextRow()
-        layout.addItem(freq_slider, colspan=3)
+        layout.addItem(freq_slider, colspan=4)
         layout.nextRow()
         layout.addItem(energy_label)
         layout.addItem(scroll_label)
         layout.addItem(spectrum_label)
+        layout.addItem(bpm_label)
     # Initialize LEDs
     led.update()
     # Start listening to live audio stream
     microphone.start_stream(microphone_update)
+
