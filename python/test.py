@@ -35,7 +35,7 @@ def roll():
     while True:
         led.pixels = np.roll(led.pixels, 1, axis=1)
         led.update()
-        time.sleep(0.05)
+        time.sleep(0.01)
 
 def color_cycle():
     led.pixels *= 0
