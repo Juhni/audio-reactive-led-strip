@@ -35,6 +35,11 @@ IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
 void setup() {
+    ledstrip.Begin();//Begin output
+    RgbwColor initial_color(100,100,100,255);
+    ledstrip.ClearTo(initial_color);
+    ledstrip.Show();//Clear the strip for use
+
     Serial.begin(115200);
     WiFi.config(ip, gateway, subnet);
     WiFi.begin(ssid, password);
@@ -50,8 +55,6 @@ void setup() {
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
     port.begin(localPort);
-    ledstrip.Begin();//Begin output
-    ledstrip.Show();//Clear the strip for use
 }
 
 uint8_t N = 0;

@@ -66,5 +66,6 @@ def clear_all():
     led.update()
 
 if __name__ == '__main__':
-    clear_all()
+    roll()
+    #color_cycle()
 
